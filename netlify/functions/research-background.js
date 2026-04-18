@@ -113,13 +113,15 @@ async function performTavilySearch(query, mode) {
 async function callTavily(apiKey, query, searchDepth, maxResults) {
     const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-            api_key: apiKey,
             query,
             search_depth: searchDepth,
             max_results: maxResults,
-            include_raw_content: true,
+            include_raw_content: false,
             include_answer: true,
         }),
     });
@@ -135,7 +137,6 @@ async function callTavily(apiKey, query, searchDepth, maxResults) {
         title: r.title || "Untitled",
         url: r.url || "",
         content: r.content || "",
-        rawContent: (r.raw_content || "").substring(0, MAX_CONTENT_PER_SOURCE),
         score: r.score || 0,
     }));
 }
@@ -159,10 +160,7 @@ function buildRAGContext(results) {
     results.forEach((r, i) => {
         ctx += `[SOURCE ${i + 1}] — ${r.title}\n`;
         ctx += `URL: ${r.url}\n`;
-        ctx += `Summary: ${r.content}\n`;
-        if (r.rawContent && r.rawContent.length > 50) {
-            ctx += `Full Content:\n${r.rawContent}\n`;
-        }
+        ctx += `Content: ${r.content}\n`;
         ctx += `${"—".repeat(40)}\n\n`;
     });
 
