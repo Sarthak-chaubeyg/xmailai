@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XMailAI — Your AI-Powered Personalized News Intelligence</title>
+    <meta name="description" content="Get personalized AI news research delivered to your inbox. XMailAI uses advanced AI and real-time web research to curate, analyze, and deliver the most relevant AI news tailored to your interests.">
+    <meta name="keywords" content="AI news, AI newsletter, XMailAI, X mail AI, personalized AI news, AI research, AI tools, AI models, free AI tools, AI updates">
+    <meta name="author" content="XMailAI">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <link rel="canonical" href="https://xmailai.netlify.app/">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://xmailai.netlify.app/">
+    <meta property="og:title" content="XMailAI — AI-Powered Personalized News Intelligence">
+    <meta property="og:description" content="Get personalized AI research reports delivered to your inbox. Real-time web research, AI analysis, and curated insights — all in one platform.">
+    <meta property="og:site_name" content="XMailAI">
+    <meta property="og:locale" content="en_US">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="XMailAI — AI-Powered News Intelligence">
+    <meta name="twitter:description" content="Personalized AI news research delivered to your inbox. Powered by real-time web search and advanced AI analysis.">
+
+    <!-- Schema.org JSON-LD -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "XMailAI",
+        "alternateName": "X Mail AI",
+        "url": "https://xmailai.netlify.app",
+        "description": "AI-Powered Personalized News Intelligence Platform. Real-time web research, AI analysis, and curated news reports delivered to your inbox.",
+        "applicationCategory": "NewsApplication",
+        "operatingSystem": "Web",
+        "browserRequirements": "Requires JavaScript",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "creator": {
+            "@type": "Organization",
+            "name": "XMailAI"
+        }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "XMailAI",
+        "alternateName": "X Mail AI",
+        "url": "https://xmailai.netlify.app",
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://xmailai.netlify.app/?q={search_term_string}",
+            "query-input": "required name=search_term_string"
+        }
+    }
+    </script>
+
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Lenis Smooth Scroll -->
+    <script src="https://unpkg.com/lenis@1.1.18/dist/lenis.min.js"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <!-- 3D Background Canvas -->
+    <canvas id="three-canvas" aria-hidden="true"></canvas>
+
+    <!-- Main Content -->
+    <main>
+        <section id="hero" class="hero" aria-label="AI Research Tool">
+            <div class="hero-content">
+                <!-- Branding -->
+                <div class="hero-badge">AI-Powered Research</div>
+                <h1 class="hero-title" id="site-title">
+                    <span class="gradient-text">XMailAI</span>
+                </h1>
+                <p class="hero-subtitle">Your Personalized AI News Intelligence</p>
+                <p class="hero-description">
+                    Real-time web research, deep analysis, and curated insights — delivered straight to your inbox
+                </p>
+
+                <!-- Search Container -->
+                <div class="search-container" id="search-container">
+                    <div class="search-box" id="search-box">
+                        <textarea
+                            id="query-input"
+                            class="query-input"
+                            placeholder="What do you want to research?"
+                            rows="3"
+                            maxlength="12000"
+                            aria-label="Research query input"
+                        ></textarea>
+                        <div class="search-controls">
+                            <div class="mode-buttons" role="radiogroup" aria-label="Research mode">
+                                <button id="btn-search" class="mode-btn active" data-mode="search" role="radio" aria-checked="true">
+                                    <span class="mode-icon">⚡</span>
+                                    <span>Search</span>
+                                </button>
+                                <button id="btn-deep" class="mode-btn" data-mode="deep" role="radio" aria-checked="false">
+                                    <span class="mode-icon">🔬</span>
+                                    <span>Deep Research</span>
+                                </button>
+                            </div>
+                            <button id="btn-submit" class="submit-btn" aria-label="Send research request" title="Send">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                    <polyline points="12 5 19 12 12 19"></polyline>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="search-hint" id="search-hint">
+                        Press <kbd>→</kbd> once to load the default AI news prompt, press again to send
+                    </p>
+                </div>
+
+                <!-- Progress Container (hidden by default) -->
+                <div class="progress-container" id="progress-container" aria-live="polite">
+                    <div class="progress-card">
+                        <div class="progress-header">
+                            <div class="progress-title-row">
+                                <div class="progress-pulse"></div>
+                                <span class="progress-title" id="progress-title">Researching...</span>
+                            </div>
+                            <span class="progress-mode" id="progress-mode"></span>
+                        </div>
+
+                        <div class="progress-stages" id="progress-stages">
+                            <div class="progress-stage" id="stage-searching" data-stage="searching">
+                                <div class="stage-indicator">
+                                    <div class="stage-dot"></div>
+                                    <div class="stage-spinner"></div>
+                                    <svg class="stage-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </div>
+                                <div class="stage-info">
+                                    <span class="stage-label">Searching the web</span>
+                                    <span class="stage-desc">Finding relevant sources across the internet...</span>
+                                </div>
+                            </div>
+
+                            <div class="stage-connector"></div>
+
+                            <div class="progress-stage" id="stage-crawling" data-stage="crawling">
+                                <div class="stage-indicator">
+                                    <div class="stage-dot"></div>
+                                    <div class="stage-spinner"></div>
+                                    <svg class="stage-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </div>
+                                <div class="stage-info">
+                                    <span class="stage-label">Crawling through sources</span>
+                                    <span class="stage-desc">Extracting and processing information...</span>
+                                </div>
+                            </div>
+
+                            <div class="stage-connector"></div>
+
+                            <div class="progress-stage" id="stage-generating" data-stage="generating">
+                                <div class="stage-indicator">
+                                    <div class="stage-dot"></div>
+                                    <div class="stage-spinner"></div>
+                                    <svg class="stage-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </div>
+                                <div class="stage-info">
+                                    <span class="stage-label">Generating insights</span>
+                                    <span class="stage-desc">AI is building your personalized report...</span>
+                                </div>
+                            </div>
+
+                            <div class="stage-connector"></div>
+
+                            <div class="progress-stage" id="stage-sending" data-stage="sending">
+                                <div class="stage-indicator">
+                                    <div class="stage-dot"></div>
+                                    <div class="stage-spinner"></div>
+                                    <svg class="stage-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </div>
+                                <div class="stage-info">
+                                    <span class="stage-label">Sending to your email</span>
+                                    <span class="stage-desc">Preparing and delivering your report...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Completion message -->
+                        <div class="result-message completion-message" id="completion-message">
+                            <div class="result-icon">✉️</div>
+                            <h2>Research Complete!</h2>
+                            <p>Your personalized report has been sent to your inbox.</p>
+                            <p class="result-email">voltavinaycadila751@gmail.com</p>
+                            <button id="btn-new-search" class="action-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                                Start New Research
+                            </button>
+                        </div>
+
+                        <!-- Error message -->
+                        <div class="result-message error-message" id="error-message">
+                            <div class="result-icon">⚠️</div>
+                            <h2>Something went wrong</h2>
+                            <p id="error-text">An error occurred during research. Please try again.</p>
+                            <button id="btn-retry" class="action-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+                                Try Again
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer" role="contentinfo">
+        <p>© 2026 <strong>XMailAI</strong> — AI-Powered Personalized News Intelligence</p>
+    </footer>
+
+    <!-- Scripts -->
+    <script type="module" src="js/scene.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
