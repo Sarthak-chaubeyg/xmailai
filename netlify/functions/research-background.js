@@ -1,10 +1,10 @@
 /* ================================================================
-   XMailAI — Background Research Function
-   Netlify Background Function (returns 202 immediately, runs up to 15 min)
+   XMailAI — Background Research Function (Netlify Functions v2)
+   Uses modern v2 format for automatic Blobs environment injection.
    Pipeline: Tavily Search → RAG Context → OpenRouter Nemotron → Resend Email
    ================================================================ */
 
-import { getStore, connectLambda } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
 import { marked } from "marked";
 
 // ---- Configuration ----
@@ -14,39 +14,59 @@ const SITE_URL = "https://xmailai.netlify.app";
 const DEEP_SUB_QUERY_COUNT = 3;
 
 // ================================================================
-// INLINE STATUS HELPER (avoids module resolution issues)
+// INLINE STATUS HELPER
 // ================================================================
 async function updateStatus(jobId, stage, message) {
     try {
         const store = getStore({ name: "research-status", consistency: "strong" });
-        await store.set(jobId, JSON.stringify({ stage, message, ts: Date.now() }));
+        const payload = JSON.stringify({ stage, message, ts: Date.now() });
+        await store.set(jobId, payload);
         console.log(`[XMailAI] Status → ${stage}: ${message}`);
     } catch (e) {
-        console.error(`[XMailAI] Status write FAILED for ${stage}:`, e.message);
+        console.error(`[XMailAI] Status write FAILED for ${stage}:`, e.message, e.stack);
     }
 }
 
-// ---- Handler ----
-export const handler = async (event) => {
-    connectLambda(event);
+// ---- v2 Background Handler ----
+// For background functions (-background suffix):
+// - Netlify sends 202 to the client BEFORE the handler runs
+// - The handler runs asynchronously for up to 15 minutes
+// - Any return value is IGNORED (client already got 202)
+export default async (request, context) => {
+    console.log("[XMailAI] Background function invoked");
+
     let body;
     try {
-        body = JSON.parse(event.body || "{}");
-    } catch {
-        return { statusCode: 400, body: "Invalid request body" };
+        body = await request.json();
+    } catch (e) {
+        console.error("[XMailAI] Failed to parse request body:", e.message);
+        return; // Can't do anything without a valid body
     }
 
     const { query, mode, jobId } = body;
     if (!query || !jobId || !mode) {
-        return { statusCode: 400, body: "Missing required fields: query, mode, jobId" };
+        console.error("[XMailAI] Missing required fields:", { query: !!query, mode: !!mode, jobId: !!jobId });
+        return;
     }
+
+    console.log(`[XMailAI] Starting research: jobId=${jobId}, mode=${mode}`);
 
     const sanitizedQuery = String(query).substring(0, 12000).trim();
     const validMode = mode === "deep" ? "deep" : "search";
 
+    // Run the entire pipeline directly (background function has 15 min timeout)
+    await runPipeline(sanitizedQuery, validMode, jobId);
+};
+
+
+// ================================================================
+// MAIN PIPELINE (runs directly in background function handler)
+// ================================================================
+async function runPipeline(sanitizedQuery, validMode, jobId) {
     try {
         // =============== STAGE 1: SEARCHING ===============
         await updateStatus(jobId, "searching", "Searching the web for relevant sources...");
+        console.log("[XMailAI] Starting pipeline...");
 
         let results;
         try {
@@ -104,9 +124,7 @@ export const handler = async (event) => {
             console.error("[XMailAI] CRITICAL: Could not even write error status:", statusErr.message);
         }
     }
-
-    return { statusCode: 200 };
-};
+}
 
 // ================================================================
 // TAVILY SEARCH
@@ -224,7 +242,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         "Cite sources using [Source N] notation with the actual URL.",
         isDeep
             ? "This is a DEEP RESEARCH request. Be extremely thorough. Aim for 5000+ words."
-            : "This is a standard SEARCH request. Be clear, concise, and actionable.",
+            : "This is a SEARCH request. Be clear, concise, and actionable.",
         "",
         "Begin your report now.",
     ].join("\n");

@@ -1,32 +1,40 @@
 /* ================================================================
-   XMailAI — Status Polling Function
+   XMailAI — Status Polling Function (Netlify Functions v2)
    Returns the current stage of a research job
    ================================================================ */
 
-import { getStore, connectLambda } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
 
-export const handler = async (event) => {
-    connectLambda(event);
+export default async (request, context) => {
     const headers = {
         "Content-Type": "application/json",
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "X-Content-Type-Options": "nosniff",
     };
 
-    if (event.httpMethod !== "GET") {
-        return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
+    if (request.method !== "GET") {
+        return new Response(JSON.stringify({ error: "Method not allowed" }), {
+            status: 405,
+            headers,
+        });
     }
 
-    const params = new URLSearchParams(event.rawQuery || "");
-    const jobId = params.get("id");
+    const url = new URL(request.url);
+    const jobId = url.searchParams.get("id");
 
     if (!jobId || jobId.length < 8 || jobId.length > 64) {
-        return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid job ID" }) };
+        return new Response(JSON.stringify({ error: "Invalid job ID" }), {
+            status: 400,
+            headers,
+        });
     }
 
     // Allow hex chars and hyphens
     if (!/^[a-f0-9\-]+$/i.test(jobId)) {
-        return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid job ID format" }) };
+        return new Response(JSON.stringify({ error: "Invalid job ID format" }), {
+            status: 400,
+            headers,
+        });
     }
 
     try {
@@ -34,20 +42,22 @@ export const handler = async (event) => {
         const raw = await store.get(jobId);
 
         if (!raw) {
-            return {
-                statusCode: 200,
-                headers,
-                body: JSON.stringify({ stage: "pending", message: "Job is queued. Please wait..." }),
-            };
+            return new Response(
+                JSON.stringify({ stage: "pending", message: "Job is queued. Please wait..." }),
+                { status: 200, headers }
+            );
         }
 
-        return { statusCode: 200, headers, body: raw };
+        return new Response(raw, { status: 200, headers });
     } catch (error) {
-        console.error("[XMailAI] Status check error:", error.message);
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({ stage: "pending", message: "Initializing..." }),
-        };
+        console.error("[XMailAI] Status check error:", error.message, error.stack);
+        return new Response(
+            JSON.stringify({ stage: "pending", message: "Initializing..." }),
+            { status: 200, headers }
+        );
     }
+};
+
+export const config = {
+    path: "/api/status",
 };

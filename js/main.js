@@ -360,7 +360,7 @@ Now perform the task and give me my personalized news.`;
         setStageActive('searching');
 
         // Send request
-        fetch('/.netlify/functions/research-background', {
+        fetch('/api/research', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -386,10 +386,12 @@ Now perform the task and give me my personalized news.`;
     // ================================================================
     function startStatusPolling(jobId) {
         var failCount = 0;
-        var maxFails = 8;
+        var maxFails = 20;
+        var pendingCount = 0;
+        var maxPending = 40;
 
         pollingTimer = setInterval(function () {
-            fetch('/.netlify/functions/status?id=' + encodeURIComponent(jobId))
+            fetch('/api/status?id=' + encodeURIComponent(jobId))
                 .then(function (res) { return res.json(); })
                 .then(function (data) {
                     failCount = 0;
@@ -397,18 +399,31 @@ Now perform the task and give me my personalized news.`;
                     if (!data || !data.stage) return;
 
                     switch (data.stage) {
+                        case 'pending':
+                            pendingCount++;
+                            setStageActive('searching');
+                            progressTitle.textContent = 'Initializing research...';
+                            if (pendingCount >= maxPending) {
+                                stopPolling();
+                                showError('Research timed out. Please try again.');
+                            }
+                            break;
+
                         case 'searching':
+                            pendingCount = 0;
                             setStageActive('searching');
                             progressTitle.textContent = 'Searching the web...';
                             break;
 
                         case 'crawling':
+                            pendingCount = 0;
                             setStageCompleted('searching');
                             setStageActive('crawling');
                             progressTitle.textContent = 'Crawling sources...';
                             break;
 
                         case 'generating':
+                            pendingCount = 0;
                             setStageCompleted('searching');
                             setStageCompleted('crawling');
                             setStageActive('generating');
@@ -416,6 +431,7 @@ Now perform the task and give me my personalized news.`;
                             break;
 
                         case 'sending':
+                            pendingCount = 0;
                             setStageCompleted('searching');
                             setStageCompleted('crawling');
                             setStageCompleted('generating');
@@ -446,7 +462,7 @@ Now perform the task and give me my personalized news.`;
                         showError('Lost connection to server. Please try again.');
                     }
                 });
-        }, 2500);
+        }, 3000);
     }
 
     function stopPolling() {

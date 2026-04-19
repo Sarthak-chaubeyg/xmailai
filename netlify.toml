@@ -8,11 +8,8 @@
 [functions]
   node_bundler = "esbuild"
 
-[[redirects]]
-  from = "/api/status"
-  to = "/.netlify/functions/status"
-  status = 200
-
+# The status function uses v2 config.path for routing (/api/status)
+# The research-background function needs a redirect since it uses the -background suffix
 [[redirects]]
   from = "/api/research"
   to = "/.netlify/functions/research-background"
