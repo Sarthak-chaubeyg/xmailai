@@ -3,9 +3,10 @@
    Returns the current stage of a research job
    ================================================================ */
 
-import { getStore } from "@netlify/blobs";
+import { getStore, connectLambda } from "@netlify/blobs";
 
 export const handler = async (event) => {
+    connectLambda(event);
     const headers = {
         "Content-Type": "application/json",
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",

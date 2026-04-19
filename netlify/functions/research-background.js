@@ -4,7 +4,7 @@
    Pipeline: Tavily Search → RAG Context → OpenRouter Nemotron → Resend Email
    ================================================================ */
 
-import { getStore } from "@netlify/blobs";
+import { getStore, connectLambda } from "@netlify/blobs";
 import { marked } from "marked";
 
 // ---- Configuration ----
@@ -28,6 +28,7 @@ async function updateStatus(jobId, stage, message) {
 
 // ---- Handler ----
 export const handler = async (event) => {
+    connectLambda(event);
     let body;
     try {
         body = JSON.parse(event.body || "{}");
