@@ -11,7 +11,6 @@ import { marked } from "marked";
 const RECIPIENT_EMAIL = "voltavinaycadila751@gmail.com";
 const MODEL_ID = "nvidia/nemotron-3-super-120b-a12b:free";
 const SITE_URL = "https://xmailai.netlify.app";
-const DEEP_SUB_QUERY_COUNT = 3;
 
 // ================================================================
 // INLINE STATUS HELPER
@@ -134,31 +133,11 @@ async function performTavilySearch(query, mode) {
     if (!apiKey) throw new Error("TAVILY_API_KEY is not set.");
 
     const isDeep = mode === "deep";
+    const searchQuery = truncateForTavily(query);
 
-    const mainResults = await callTavily(apiKey, query, isDeep ? "advanced" : "basic", 10);
-
-    if (!isDeep) return mainResults;
-
-    // Deep mode: additional sub-query searches
-    const subQueries = generateSubQueries(query);
-    const seenUrls = new Set(mainResults.map((r) => r.url));
-    const additionalResults = [];
-
-    for (const sq of subQueries) {
-        try {
-            const subResults = await callTavily(apiKey, sq, "basic", 10);
-            for (const r of subResults) {
-                if (!seenUrls.has(r.url)) {
-                    seenUrls.add(r.url);
-                    additionalResults.push(r);
-                }
-            }
-        } catch (e) {
-            console.warn(`[XMailAI] Sub-query failed: "${sq}" — ${e.message}`);
-        }
-    }
-
-    return [...mainResults, ...additionalResults];
+    // Normal search: basic depth (1 credit)
+    // Deep research: advanced depth (2 credits)
+    return await callTavily(apiKey, searchQuery, isDeep ? "advanced" : "basic", 10);
 }
 
 async function callTavily(apiKey, query, searchDepth, maxResults) {
@@ -195,25 +174,28 @@ async function callTavily(apiKey, query, searchDepth, maxResults) {
     }));
 }
 
-function generateSubQueries(mainQuery) {
-    const base = mainQuery.substring(0, 150).replace(/\n/g, " ");
-    return [
-        `${base} latest releases updates 2026`,
-        `${base} free open source tools alternatives`,
-        `${base} benchmarks comparison analysis reviews`,
-    ].slice(0, DEEP_SUB_QUERY_COUNT);
+function truncateForTavily(query, maxLength = 380) {
+    const cleaned = query.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+    if (cleaned.length <= maxLength) return cleaned;
+    const truncated = cleaned.substring(0, maxLength);
+    const lastSpace = truncated.lastIndexOf(" ");
+    return lastSpace > maxLength * 0.7 ? truncated.substring(0, lastSpace) : truncated;
 }
 
 // ================================================================
 // RAG CONTEXT BUILDER
 // ================================================================
 function buildRAGContext(results) {
+    const maxContentPerSource = 1000;
     let ctx = `========== WEB RESEARCH DATA (${results.length} sources) ==========\n\n`;
 
     results.forEach((r, i) => {
+        const content = r.content.length > maxContentPerSource
+            ? r.content.substring(0, maxContentPerSource) + "..."
+            : r.content;
         ctx += `[SOURCE ${i + 1}] — ${r.title}\n`;
         ctx += `URL: ${r.url}\n`;
-        ctx += `Content: ${r.content}\n`;
+        ctx += `Content: ${content}\n`;
         ctx += `${"—".repeat(40)}\n\n`;
     });
 
@@ -231,9 +213,12 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
     const isDeep = mode === "deep";
     const systemPrompt = getSystemPrompt(isDeep, sourceCount);
 
+    // Truncate user query for prompt to avoid overwhelming the model
+    const queryForPrompt = query.length > 2000 ? query.substring(0, 2000) + "..." : query;
+
     const userPrompt = [
         "USER'S RESEARCH QUERY:",
-        query,
+        queryForPrompt,
         "",
         ragContext,
         "",
@@ -247,42 +232,67 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         "Begin your report now.",
     ].join("\n");
 
-    console.log(`[XMailAI] Calling OpenRouter: model=${MODEL_ID}`);
+    // Retry logic — free models can be unreliable
+    const maxRetries = 3;
+    let lastError = null;
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-            "HTTP-Referer": SITE_URL,
-            "X-Title": "XMailAI",
-        },
-        body: JSON.stringify({
-            model: MODEL_ID,
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt },
-            ],
-            max_tokens: isDeep ? 65536 : 16384,
-            temperature: 0.3,
-            top_p: 0.9,
-        }),
-    });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`[XMailAI] OpenRouter attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
 
-    if (!response.ok) {
-        const errBody = await response.text().catch(() => "");
-        throw new Error(`OpenRouter ${response.status}: ${errBody.substring(0, 300)}`);
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${apiKey}`,
+                    "HTTP-Referer": SITE_URL,
+                    "X-Title": "XMailAI",
+                },
+                body: JSON.stringify({
+                    model: MODEL_ID,
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPrompt },
+                    ],
+                    max_tokens: isDeep ? 16384 : 8192,
+                    temperature: 0.3,
+                    top_p: 0.9,
+                }),
+            });
+
+            if (!response.ok) {
+                const errBody = await response.text().catch(() => "");
+                throw new Error(`OpenRouter ${response.status}: ${errBody.substring(0, 300)}`);
+            }
+
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content;
+            const finishReason = data.choices?.[0]?.finish_reason || "unknown";
+
+            console.log(`[XMailAI] Attempt ${attempt}: ${(content || "").length} chars, finish_reason=${finishReason}`);
+
+            if (!content || content.trim().length < 50) {
+                lastError = new Error(`AI model returned insufficient content (attempt ${attempt}, finish_reason=${finishReason}). The model may be overloaded — retrying.`);
+                console.warn(`[XMailAI] ${lastError.message}`);
+                if (attempt < maxRetries) {
+                    await new Promise((r) => setTimeout(r, attempt * 2000));
+                    continue;
+                }
+                throw lastError;
+            }
+
+            console.log(`[XMailAI] OpenRouter response: ${content.length} chars`);
+            return content;
+        } catch (err) {
+            lastError = err;
+            if (attempt < maxRetries && !err.message.includes("API key")) {
+                console.warn(`[XMailAI] Attempt ${attempt} failed: ${err.message}. Retrying in ${attempt * 2}s...`);
+                await new Promise((r) => setTimeout(r, attempt * 2000));
+            }
+        }
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    if (!content || content.trim().length < 50) {
-        throw new Error("AI model returned insufficient content. Please try again.");
-    }
-
-    console.log(`[XMailAI] OpenRouter response: ${content.length} chars`);
-    return content;
+    throw lastError || new Error("AI generation failed after all retry attempts.");
 }
 
 function getSystemPrompt(isDeep, sourceCount) {
