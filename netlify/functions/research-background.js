@@ -10,9 +10,9 @@ import { marked } from "marked";
 // ---- Configuration ----
 const RECIPIENT_EMAIL = "voltavinaycadila751@gmail.com";
 const MODELS = [
+    "nvidia/nemotron-3-super-120b-a12b:free",
     "google/gemma-4-31b-it:free",
     "qwen/qwen3-235b-a22b:free",
-    "deepseek/deepseek-r1-0528:free",
 ];
 const SITE_URL = "https://xmailai.netlify.app";
 
