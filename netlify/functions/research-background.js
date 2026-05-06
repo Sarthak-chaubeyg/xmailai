@@ -311,6 +311,19 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         "Begin your report now.",
     ].join("\n");
 
+    // Dynamically calculate max_tokens to stay within the model's context window
+    // The 262144 context limit includes BOTH input and output tokens
+    const MODEL_CONTEXT_LIMIT = 262144;
+    const SAFETY_BUFFER = 200; // Small buffer to avoid edge cases
+    const totalInputText = systemPrompt + userPrompt;
+    const estimatedInputTokens = Math.ceil(totalInputText.length / 4);
+    const maxOutputTokens = Math.min(
+        MODEL_CONTEXT_LIMIT - estimatedInputTokens - SAFETY_BUFFER,
+        isDeep ? MODEL_CONTEXT_LIMIT : 32768
+    );
+
+    console.log(`[XMailAI] Input: ~${estimatedInputTokens} tokens, max output: ${maxOutputTokens} tokens`);
+
     // Retry logic — free models can be unreliable
     const maxRetries = 3;
     const TIMEOUT_MS = 120000; // 120 seconds per attempt
@@ -340,7 +353,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt },
                         ],
-                        max_tokens: isDeep ? 262144 : 16384,
+                        max_tokens: maxOutputTokens,
                         temperature: 0.3,
                         top_p: 0.9,
                     }),
