@@ -84,7 +84,7 @@ async function runPipeline(sanitizedQuery, validMode, jobId) {
         // =============== STAGE 2: CRAWLING ===============
         await updateStatus(jobId, "crawling", `Processing ${results.length} sources...`);
 
-        const ragContext = buildRAGContext(results);
+        const ragContext = buildRAGContext(results, validMode === "deep");
 
         // =============== STAGE 3: GENERATING ===============
         await updateStatus(jobId, "generating", "AI is analyzing and generating your personalized report...");
@@ -183,23 +183,102 @@ function truncateForTavily(query, maxLength = 380) {
 }
 
 // ================================================================
-// RAG CONTEXT BUILDER
+// UPGRADED RAG ENGINE
 // ================================================================
-function buildRAGContext(results) {
-    const maxContentPerSource = 1000;
-    let ctx = `========== WEB RESEARCH DATA (${results.length} sources) ==========\n\n`;
 
-    results.forEach((r, i) => {
-        const content = r.content.length > maxContentPerSource
-            ? r.content.substring(0, maxContentPerSource) + "..."
-            : r.content;
-        ctx += `[SOURCE ${i + 1}] — ${r.title}\n`;
+/**
+ * Estimates token count (~4 chars per token for English)
+ */
+function estimateTokens(text) {
+    return Math.ceil(text.length / 4);
+}
+
+/**
+ * Deduplicates results by URL (hostname + pathname)
+ */
+function deduplicateResults(results) {
+    const seen = new Set();
+    return results.filter((r) => {
+        try {
+            const u = new URL(r.url);
+            const key = u.hostname + u.pathname;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        } catch {
+            return true;
+        }
+    });
+}
+
+/**
+ * Extracts the most informative sentences from content,
+ * staying within a character budget.
+ */
+function extractKeyContent(content, maxChars) {
+    if (!content) return "";
+    if (content.length <= maxChars) return content;
+
+    const sentences = content.match(/[^.!?\n]+[.!?\n]+/g) || [content];
+    let result = "";
+    for (const s of sentences) {
+        if (result.length + s.length > maxChars) break;
+        result += s;
+    }
+    return result || content.substring(0, maxChars);
+}
+
+/**
+ * Filters out results with very little useful content
+ */
+function filterLowQuality(results) {
+    return results.filter((r) => r.content && r.content.trim().length > 60);
+}
+
+/**
+ * Advanced RAG Context Builder
+ * - Filters low-quality results
+ * - Deduplicates by URL
+ * - Sorts by relevance score
+ * - Extracts key content per source within a token budget
+ * - Caps total context to stay within free-model limits
+ */
+function buildRAGContext(results, isDeep = false) {
+    const MAX_TOTAL_CHARS = isDeep ? 12000 : 8000;
+    const MAX_SOURCES = isDeep ? 8 : 6;
+
+    // Step 1: Filter low-quality
+    let processed = filterLowQuality(results);
+    console.log(`[XMailAI-RAG] After quality filter: ${processed.length}/${results.length} sources`);
+
+    // Step 2: Deduplicate
+    processed = deduplicateResults(processed);
+    console.log(`[XMailAI-RAG] After dedup: ${processed.length} sources`);
+
+    // Step 3: Sort by relevance score (highest first)
+    processed.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+    // Step 4: Take top sources
+    processed = processed.slice(0, MAX_SOURCES);
+
+    // Step 5: Budget content per source
+    const perSourceBudget = Math.floor(MAX_TOTAL_CHARS / processed.length);
+
+    // Step 6: Build context
+    let ctx = `===== WEB RESEARCH DATA (${processed.length} sources) =====\n\n`;
+
+    processed.forEach((r, i) => {
+        const content = extractKeyContent(r.content, perSourceBudget);
+        ctx += `[SOURCE ${i + 1}] ${r.title}\n`;
         ctx += `URL: ${r.url}\n`;
-        ctx += `Content: ${content}\n`;
-        ctx += `${"—".repeat(40)}\n\n`;
+        ctx += `Relevance: ${((r.score || 0) * 100).toFixed(0)}%\n`;
+        ctx += `${content}\n`;
+        ctx += `---\n\n`;
     });
 
-    ctx += `========== END OF WEB RESEARCH DATA ==========`;
+    ctx += `===== END OF RESEARCH DATA =====`;
+
+    console.log(`[XMailAI-RAG] Final context: ${processed.length} sources, ${ctx.length} chars (~${estimateTokens(ctx)} tokens)`);
     return ctx;
 }
 
@@ -261,7 +340,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt },
                         ],
-                        max_tokens: isDeep ? 65536 : 16384,
+                        max_tokens: isDeep ? 16384 : 8192,
                         temperature: 0.3,
                         top_p: 0.9,
                     }),
@@ -279,6 +358,13 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
             const data = await response.json();
             const content = data.choices?.[0]?.message?.content;
             const finishReason = data.choices?.[0]?.finish_reason || "unknown";
+
+            // Debug: log raw response structure when content is missing
+            if (!content || content.trim().length < 50) {
+                console.warn(`[XMailAI] Raw response keys: ${JSON.stringify(Object.keys(data))}`);
+                console.warn(`[XMailAI] Choices: ${JSON.stringify(data.choices?.map(c => ({ finish_reason: c.finish_reason, content_len: c.message?.content?.length || 0 })))}`);
+                if (data.error) console.error(`[XMailAI] API error in response: ${JSON.stringify(data.error)}`);
+            }
 
             console.log(`[XMailAI] Attempt ${attempt}: ${(content || "").length} chars, finish_reason=${finishReason}`);
 
