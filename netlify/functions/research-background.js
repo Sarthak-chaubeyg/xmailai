@@ -9,11 +9,7 @@ import { marked } from "marked";
 
 // ---- Configuration ----
 const RECIPIENT_EMAIL = "voltavinaycadila751@gmail.com";
-const MODELS = [
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "google/gemma-4-31b-it:free",
-    "qwen/qwen3-235b-a22b:free",
-];
+const MODEL_ID = "nvidia/nemotron-3-super-120b-a12b:free";
 const SITE_URL = "https://xmailai.netlify.app";
 
 // ================================================================
@@ -208,7 +204,7 @@ function buildRAGContext(results) {
 }
 
 // ================================================================
-// AI GENERATION (OpenRouter + model fallback chain)
+// AI GENERATION (OpenRouter + Nemotron)
 // ================================================================
 async function generateWithNemotron(query, ragContext, mode, sourceCount) {
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -236,61 +232,67 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         "Begin your report now.",
     ].join("\n");
 
-    // Try each model in the fallback chain
+    // Retry logic — free models can be unreliable
+    const maxRetries = 3;
     let lastError = null;
 
-    for (const modelId of MODELS) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            console.log(`[XMailAI] Trying model: ${modelId}`);
-            const content = await callOpenRouter(apiKey, modelId, systemPrompt, userPrompt, isDeep);
-            if (content) return content;
+            console.log(`[XMailAI] OpenRouter attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
+
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${apiKey}`,
+                    "HTTP-Referer": SITE_URL,
+                    "X-Title": "XMailAI",
+                },
+                body: JSON.stringify({
+                    model: MODEL_ID,
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPrompt },
+                    ],
+                    max_tokens: isDeep ? 16384 : 8192,
+                    temperature: 0.3,
+                    top_p: 0.9,
+                }),
+            });
+
+            if (!response.ok) {
+                const errBody = await response.text().catch(() => "");
+                throw new Error(`OpenRouter ${response.status}: ${errBody.substring(0, 300)}`);
+            }
+
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content;
+            const finishReason = data.choices?.[0]?.finish_reason || "unknown";
+
+            console.log(`[XMailAI] Attempt ${attempt}: ${(content || "").length} chars, finish_reason=${finishReason}`);
+
+            if (!content || content.trim().length < 50) {
+                lastError = new Error(`AI model returned insufficient content (attempt ${attempt}, finish_reason=${finishReason}). The model may be overloaded — retrying.`);
+                console.warn(`[XMailAI] ${lastError.message}`);
+                if (attempt < maxRetries) {
+                    await new Promise((r) => setTimeout(r, attempt * 2000));
+                    continue;
+                }
+                throw lastError;
+            }
+
+            console.log(`[XMailAI] OpenRouter response: ${content.length} chars`);
+            return content;
         } catch (err) {
-            console.warn(`[XMailAI] Model ${modelId} failed: ${err.message}`);
             lastError = err;
-            // Continue to next model in the chain
+            if (attempt < maxRetries && !err.message.includes("API key")) {
+                console.warn(`[XMailAI] Attempt ${attempt} failed: ${err.message}. Retrying in ${attempt * 2}s...`);
+                await new Promise((r) => setTimeout(r, attempt * 2000));
+            }
         }
     }
 
-    throw lastError || new Error("All AI models failed. Please try again later.");
-}
-
-async function callOpenRouter(apiKey, modelId, systemPrompt, userPrompt, isDeep) {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-            "HTTP-Referer": SITE_URL,
-            "X-Title": "XMailAI",
-        },
-        body: JSON.stringify({
-            model: modelId,
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt },
-            ],
-            max_tokens: isDeep ? 16384 : 8192,
-            temperature: 0.3,
-            top_p: 0.9,
-        }),
-    });
-
-    if (!response.ok) {
-        const errBody = await response.text().catch(() => "");
-        throw new Error(`OpenRouter ${response.status} (${modelId}): ${errBody.substring(0, 300)}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-    const finishReason = data.choices?.[0]?.finish_reason || "unknown";
-
-    console.log(`[XMailAI] ${modelId}: ${(content || "").length} chars, finish_reason=${finishReason}`);
-
-    if (!content || content.trim().length < 50) {
-        throw new Error(`${modelId} returned insufficient content (finish_reason=${finishReason})`);
-    }
-
-    return content;
+    throw lastError || new Error("AI generation failed after all retry attempts.");
 }
 
 function getSystemPrompt(isDeep, sourceCount) {
