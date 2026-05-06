@@ -340,7 +340,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                             { role: "system", content: systemPrompt },
                             { role: "user", content: userPrompt },
                         ],
-                        max_tokens: isDeep ? 16384 : 8192,
+                        max_tokens: isDeep ? 262144 : 16384,
                         temperature: 0.3,
                         top_p: 0.9,
                     }),
