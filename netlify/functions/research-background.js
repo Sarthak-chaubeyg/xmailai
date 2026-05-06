@@ -1,7 +1,7 @@
 /* ================================================================
    XMailAI — Background Research Function (Netlify Functions v2)
    Uses modern v2 format for automatic Blobs environment injection.
-   Pipeline: Tavily Search → RAG Context → OpenRouter Nemotron → Resend Email
+   Pipeline: Tavily Search → RAG Context → NVIDIA Nemotron → Resend Email
    ================================================================ */
 
 import { getStore } from "@netlify/blobs";
@@ -9,7 +9,8 @@ import { marked } from "marked";
 
 // ---- Configuration ----
 const RECIPIENT_EMAIL = "voltavinaycadila751@gmail.com";
-const MODEL_ID = "nvidia/nemotron-3-super-120b-a12b:free";
+const MODEL_ID = "nvidia/nemotron-3-super-120b-a12b";
+const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const SITE_URL = "https://xmailai.netlify.app";
 
 // ================================================================
@@ -283,11 +284,11 @@ function buildRAGContext(results, isDeep = false) {
 }
 
 // ================================================================
-// AI GENERATION (OpenRouter + Nemotron)
+// AI GENERATION (NVIDIA API — Direct)
 // ================================================================
 async function generateWithNemotron(query, ragContext, mode, sourceCount) {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set.");
+    const apiKey = process.env.NVIDIA_API_KEY;
+    if (!apiKey) throw new Error("NVIDIA_API_KEY is not set.");
 
     const isDeep = mode === "deep";
     const systemPrompt = getSystemPrompt(isDeep, sourceCount);
@@ -311,41 +312,37 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         "Begin your report now.",
     ].join("\n");
 
-    // Dynamically calculate max_tokens to stay within the model's context window
-    // The 262144 context limit includes BOTH input and output tokens
-    const MODEL_CONTEXT_LIMIT = 262144;
-    const SAFETY_BUFFER = 2000; // Conservative buffer for tokenizer differences
+    // NVIDIA offers 1M context window — dynamically calculate max output tokens
+    const MODEL_CONTEXT_LIMIT = 1000000;
+    const SAFETY_BUFFER = 2000;
     const totalInputText = systemPrompt + userPrompt;
-    const estimatedInputTokens = Math.ceil(totalInputText.length / 3); // ~3 chars per token (conservative)
+    const estimatedInputTokens = Math.ceil(totalInputText.length / 3);
     const maxOutputTokens = Math.min(
         MODEL_CONTEXT_LIMIT - estimatedInputTokens - SAFETY_BUFFER,
-        isDeep ? MODEL_CONTEXT_LIMIT : 32768
+        isDeep ? 65536 : 32768
     );
 
-    console.log(`[XMailAI] Input: ~${estimatedInputTokens} tokens, max output: ${maxOutputTokens} tokens`);
+    console.log(`[XMailAI] NVIDIA API — Input: ~${estimatedInputTokens} tokens, max output: ${maxOutputTokens} tokens`);
 
-    // Retry logic — free models can be unreliable
+    // Retry logic
     const maxRetries = 3;
-    const TIMEOUT_MS = 120000; // 120 seconds per attempt
+    const TIMEOUT_MS = 180000; // 180 seconds per attempt (NVIDIA can be slower)
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            console.log(`[XMailAI] OpenRouter attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
+            console.log(`[XMailAI] NVIDIA attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
 
-            // AbortController to enforce a timeout — prevents hanging forever
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
             let response;
             try {
-                response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                response = await fetch(NVIDIA_API_URL, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                         Authorization: `Bearer ${apiKey}`,
-                        "HTTP-Referer": SITE_URL,
-                        "X-Title": "XMailAI",
                     },
                     body: JSON.stringify({
                         model: MODEL_ID,
@@ -356,6 +353,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                         max_tokens: maxOutputTokens,
                         temperature: 0.3,
                         top_p: 0.9,
+                        stream: false,
                     }),
                     signal: controller.signal,
                 });
@@ -365,7 +363,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
 
             if (!response.ok) {
                 const errBody = await response.text().catch(() => "");
-                throw new Error(`OpenRouter ${response.status}: ${errBody.substring(0, 300)}`);
+                throw new Error(`NVIDIA API ${response.status}: ${errBody.substring(0, 300)}`);
             }
 
             const data = await response.json();
@@ -376,13 +374,13 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
             if (!content || content.trim().length < 50) {
                 console.warn(`[XMailAI] Raw response keys: ${JSON.stringify(Object.keys(data))}`);
                 console.warn(`[XMailAI] Choices: ${JSON.stringify(data.choices?.map(c => ({ finish_reason: c.finish_reason, content_len: c.message?.content?.length || 0 })))}`);
-                if (data.error) console.error(`[XMailAI] API error in response: ${JSON.stringify(data.error)}`);
+                if (data.error) console.error(`[XMailAI] API error: ${JSON.stringify(data.error)}`);
             }
 
             console.log(`[XMailAI] Attempt ${attempt}: ${(content || "").length} chars, finish_reason=${finishReason}`);
 
             if (!content || content.trim().length < 50) {
-                lastError = new Error(`AI model returned insufficient content (attempt ${attempt}, finish_reason=${finishReason}). The model may be overloaded — retrying.`);
+                lastError = new Error(`AI model returned insufficient content (attempt ${attempt}, finish_reason=${finishReason}). Retrying...`);
                 console.warn(`[XMailAI] ${lastError.message}`);
                 if (attempt < maxRetries) {
                     await new Promise((r) => setTimeout(r, attempt * 3000));
@@ -391,7 +389,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                 throw lastError;
             }
 
-            console.log(`[XMailAI] OpenRouter response: ${content.length} chars`);
+            console.log(`[XMailAI] NVIDIA response: ${content.length} chars`);
             return content;
         } catch (err) {
             lastError = err;
