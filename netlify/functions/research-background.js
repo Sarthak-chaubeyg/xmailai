@@ -234,31 +234,42 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
 
     // Retry logic — free models can be unreliable
     const maxRetries = 3;
+    const TIMEOUT_MS = 120000; // 120 seconds per attempt
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             console.log(`[XMailAI] OpenRouter attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
 
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${apiKey}`,
-                    "HTTP-Referer": SITE_URL,
-                    "X-Title": "XMailAI",
-                },
-                body: JSON.stringify({
-                    model: MODEL_ID,
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        { role: "user", content: userPrompt },
-                    ],
-                    max_tokens: isDeep ? 16384 : 8192,
-                    temperature: 0.3,
-                    top_p: 0.9,
-                }),
-            });
+            // AbortController to enforce a timeout — prevents hanging forever
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+            let response;
+            try {
+                response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${apiKey}`,
+                        "HTTP-Referer": SITE_URL,
+                        "X-Title": "XMailAI",
+                    },
+                    body: JSON.stringify({
+                        model: MODEL_ID,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: userPrompt },
+                        ],
+                        max_tokens: isDeep ? 65536 : 16384,
+                        temperature: 0.3,
+                        top_p: 0.9,
+                    }),
+                    signal: controller.signal,
+                });
+            } finally {
+                clearTimeout(timeoutId);
+            }
 
             if (!response.ok) {
                 const errBody = await response.text().catch(() => "");
@@ -275,7 +286,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                 lastError = new Error(`AI model returned insufficient content (attempt ${attempt}, finish_reason=${finishReason}). The model may be overloaded — retrying.`);
                 console.warn(`[XMailAI] ${lastError.message}`);
                 if (attempt < maxRetries) {
-                    await new Promise((r) => setTimeout(r, attempt * 2000));
+                    await new Promise((r) => setTimeout(r, attempt * 3000));
                     continue;
                 }
                 throw lastError;
@@ -285,9 +296,13 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
             return content;
         } catch (err) {
             lastError = err;
-            if (attempt < maxRetries && !err.message.includes("API key")) {
-                console.warn(`[XMailAI] Attempt ${attempt} failed: ${err.message}. Retrying in ${attempt * 2}s...`);
-                await new Promise((r) => setTimeout(r, attempt * 2000));
+            const isTimeout = err.name === "AbortError";
+            const msg = isTimeout ? `Request timed out after ${TIMEOUT_MS / 1000}s` : err.message;
+            if (attempt < maxRetries && !err.message?.includes("API key")) {
+                console.warn(`[XMailAI] Attempt ${attempt} failed: ${msg}. Retrying in ${attempt * 3}s...`);
+                await new Promise((r) => setTimeout(r, attempt * 3000));
+            } else {
+                console.error(`[XMailAI] Attempt ${attempt} failed (final): ${msg}`);
             }
         }
     }
