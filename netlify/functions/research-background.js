@@ -314,9 +314,9 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
     // Dynamically calculate max_tokens to stay within the model's context window
     // The 262144 context limit includes BOTH input and output tokens
     const MODEL_CONTEXT_LIMIT = 262144;
-    const SAFETY_BUFFER = 200; // Small buffer to avoid edge cases
+    const SAFETY_BUFFER = 2000; // Conservative buffer for tokenizer differences
     const totalInputText = systemPrompt + userPrompt;
-    const estimatedInputTokens = Math.ceil(totalInputText.length / 4);
+    const estimatedInputTokens = Math.ceil(totalInputText.length / 3); // ~3 chars per token (conservative)
     const maxOutputTokens = Math.min(
         MODEL_CONTEXT_LIMIT - estimatedInputTokens - SAFETY_BUFFER,
         isDeep ? MODEL_CONTEXT_LIMIT : 32768
