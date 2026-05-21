@@ -1,7 +1,7 @@
 /* ================================================================
    XMailAI — Background Research Function (Netlify Functions v2)
    Uses modern v2 format for automatic Blobs environment injection.
-   Pipeline: Tavily Search → RAG Context → NVIDIA Nemotron → Resend Email
+   Pipeline: Tavily Search → RAG Context → OpenRouter Nemotron → Resend Email
    ================================================================ */
 
 import { getStore } from "@netlify/blobs";
@@ -9,8 +9,8 @@ import { marked } from "marked";
 
 // ---- Configuration ----
 const RECIPIENT_EMAIL = "voltavinaycadila751@gmail.com";
-const MODEL_ID = "nvidia/nemotron-3-super-120b-a12b";
-const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const MODEL_ID = "nvidia/nemotron-3-super-120b-a12b:free";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const SITE_URL = "https://xmailai.netlify.app";
 
 // ================================================================
@@ -286,11 +286,11 @@ function buildRAGContext(results, isDeep = false) {
 }
 
 // ================================================================
-// AI GENERATION (NVIDIA API — Direct)
+// AI GENERATION (OpenRouter + Nemotron)
 // ================================================================
 async function generateWithNemotron(query, ragContext, mode, sourceCount) {
-    const apiKey = process.env.NVIDIA_API_KEY;
-    if (!apiKey) throw new Error("NVIDIA_API_KEY is not set.");
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY is not set.");
 
     const isDeep = mode === "deep";
     const systemPrompt = getSystemPrompt(isDeep, sourceCount);
@@ -314,32 +314,38 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         "Begin your report now.",
     ].join("\n");
 
-    // NVIDIA trial API works best with moderate max_tokens
-    // Very high values (32K+) cause stalling on the free trial endpoint
-    const maxOutputTokens = isDeep ? 16384 : 4096;
+    // Dynamic max_tokens: fill the entire remaining 262K context window
+    // Context limit = 262144 (input + output combined)
+    const MODEL_CONTEXT_LIMIT = 262144;
+    const SAFETY_BUFFER = 4000; // Conservative buffer for tokenizer variance
+    const totalInputText = systemPrompt + userPrompt;
+    const estimatedInputTokens = Math.ceil(totalInputText.length / 3);
+    const maxOutputTokens = MODEL_CONTEXT_LIMIT - estimatedInputTokens - SAFETY_BUFFER;
 
-    console.log(`[XMailAI] NVIDIA API — max output: ${maxOutputTokens} tokens`);
+    console.log(`[XMailAI] OpenRouter — Input: ~${estimatedInputTokens} tokens, max output: ${maxOutputTokens} tokens`);
 
-    // Retry logic — fewer retries with shorter timeout to fail fast
+    // Retry logic
     const maxRetries = 2;
-    const TIMEOUT_MS = 90000; // 90 seconds per attempt
+    const TIMEOUT_MS = 120000; // 120 seconds per attempt
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             const startTime = Date.now();
-            console.log(`[XMailAI] NVIDIA attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
+            console.log(`[XMailAI] OpenRouter attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
 
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
             let response;
             try {
-                response = await fetch(NVIDIA_API_URL, {
+                response = await fetch(OPENROUTER_API_URL, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                         Authorization: `Bearer ${apiKey}`,
+                        "HTTP-Referer": SITE_URL,
+                        "X-Title": "XMailAI",
                     },
                     body: JSON.stringify({
                         model: MODEL_ID,
@@ -350,7 +356,6 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                         max_tokens: maxOutputTokens,
                         temperature: 0.3,
                         top_p: 0.9,
-                        stream: false,
                     }),
                     signal: controller.signal,
                 });
@@ -362,7 +367,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
 
             if (!response.ok) {
                 const errBody = await response.text().catch(() => "");
-                throw new Error(`NVIDIA API ${response.status} (${elapsed}s): ${errBody.substring(0, 300)}`);
+                throw new Error(`OpenRouter ${response.status} (${elapsed}s): ${errBody.substring(0, 300)}`);
             }
 
             const data = await response.json();
@@ -371,13 +376,9 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
 
             console.log(`[XMailAI] Attempt ${attempt} completed in ${elapsed}s: ${(content || "").length} chars, finish_reason=${finishReason}`);
 
-            // Debug: log raw response when content is missing
             if (!content || content.trim().length < 50) {
                 console.warn(`[XMailAI] Response keys: ${JSON.stringify(Object.keys(data))}`);
                 if (data.error) console.error(`[XMailAI] API error: ${JSON.stringify(data.error)}`);
-            }
-
-            if (!content || content.trim().length < 50) {
                 lastError = new Error(`AI returned insufficient content (attempt ${attempt}, ${elapsed}s, finish_reason=${finishReason}).`);
                 console.warn(`[XMailAI] ${lastError.message}`);
                 if (attempt < maxRetries) {
@@ -387,7 +388,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                 throw lastError;
             }
 
-            console.log(`[XMailAI] NVIDIA response: ${content.length} chars in ${elapsed}s`);
+            console.log(`[XMailAI] OpenRouter response: ${content.length} chars in ${elapsed}s`);
             return content;
         } catch (err) {
             lastError = err;
