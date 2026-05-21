@@ -308,31 +308,26 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         "Using EXCLUSIVELY the web research data above, produce your comprehensive research report.",
         "Cite sources using [Source N] notation with the actual URL.",
         isDeep
-            ? "This is a DEEP RESEARCH request. Be extremely thorough. Aim for 5000+ words."
+            ? "This is a DEEP RESEARCH request. Be extremely thorough and detailed."
             : "This is a SEARCH request. Be clear, concise, and actionable.",
         "",
         "Begin your report now.",
     ].join("\n");
 
-    // NVIDIA offers 1M context window — dynamically calculate max output tokens
-    const MODEL_CONTEXT_LIMIT = 1000000;
-    const SAFETY_BUFFER = 2000;
-    const totalInputText = systemPrompt + userPrompt;
-    const estimatedInputTokens = Math.ceil(totalInputText.length / 3);
-    const maxOutputTokens = Math.min(
-        MODEL_CONTEXT_LIMIT - estimatedInputTokens - SAFETY_BUFFER,
-        isDeep ? 65536 : 32768
-    );
+    // NVIDIA trial API works best with moderate max_tokens
+    // Very high values (32K+) cause stalling on the free trial endpoint
+    const maxOutputTokens = isDeep ? 16384 : 4096;
 
-    console.log(`[XMailAI] NVIDIA API — Input: ~${estimatedInputTokens} tokens, max output: ${maxOutputTokens} tokens`);
+    console.log(`[XMailAI] NVIDIA API — max output: ${maxOutputTokens} tokens`);
 
-    // Retry logic
-    const maxRetries = 3;
-    const TIMEOUT_MS = 180000; // 180 seconds per attempt (NVIDIA can be slower)
+    // Retry logic — fewer retries with shorter timeout to fail fast
+    const maxRetries = 2;
+    const TIMEOUT_MS = 90000; // 90 seconds per attempt
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+            const startTime = Date.now();
             console.log(`[XMailAI] NVIDIA attempt ${attempt}/${maxRetries}: model=${MODEL_ID}`);
 
             const controller = new AbortController();
@@ -363,43 +358,44 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
                 clearTimeout(timeoutId);
             }
 
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
             if (!response.ok) {
                 const errBody = await response.text().catch(() => "");
-                throw new Error(`NVIDIA API ${response.status}: ${errBody.substring(0, 300)}`);
+                throw new Error(`NVIDIA API ${response.status} (${elapsed}s): ${errBody.substring(0, 300)}`);
             }
 
             const data = await response.json();
             const content = data.choices?.[0]?.message?.content;
             const finishReason = data.choices?.[0]?.finish_reason || "unknown";
 
-            // Debug: log raw response structure when content is missing
+            console.log(`[XMailAI] Attempt ${attempt} completed in ${elapsed}s: ${(content || "").length} chars, finish_reason=${finishReason}`);
+
+            // Debug: log raw response when content is missing
             if (!content || content.trim().length < 50) {
-                console.warn(`[XMailAI] Raw response keys: ${JSON.stringify(Object.keys(data))}`);
-                console.warn(`[XMailAI] Choices: ${JSON.stringify(data.choices?.map(c => ({ finish_reason: c.finish_reason, content_len: c.message?.content?.length || 0 })))}`);
+                console.warn(`[XMailAI] Response keys: ${JSON.stringify(Object.keys(data))}`);
                 if (data.error) console.error(`[XMailAI] API error: ${JSON.stringify(data.error)}`);
             }
 
-            console.log(`[XMailAI] Attempt ${attempt}: ${(content || "").length} chars, finish_reason=${finishReason}`);
-
             if (!content || content.trim().length < 50) {
-                lastError = new Error(`AI model returned insufficient content (attempt ${attempt}, finish_reason=${finishReason}). Retrying...`);
+                lastError = new Error(`AI returned insufficient content (attempt ${attempt}, ${elapsed}s, finish_reason=${finishReason}).`);
                 console.warn(`[XMailAI] ${lastError.message}`);
                 if (attempt < maxRetries) {
-                    await new Promise((r) => setTimeout(r, attempt * 3000));
+                    await new Promise((r) => setTimeout(r, 3000));
                     continue;
                 }
                 throw lastError;
             }
 
-            console.log(`[XMailAI] NVIDIA response: ${content.length} chars`);
+            console.log(`[XMailAI] NVIDIA response: ${content.length} chars in ${elapsed}s`);
             return content;
         } catch (err) {
             lastError = err;
             const isTimeout = err.name === "AbortError";
             const msg = isTimeout ? `Request timed out after ${TIMEOUT_MS / 1000}s` : err.message;
             if (attempt < maxRetries && !err.message?.includes("API key")) {
-                console.warn(`[XMailAI] Attempt ${attempt} failed: ${msg}. Retrying in ${attempt * 3}s...`);
-                await new Promise((r) => setTimeout(r, attempt * 3000));
+                console.warn(`[XMailAI] Attempt ${attempt} failed: ${msg}. Retrying in 3s...`);
+                await new Promise((r) => setTimeout(r, 3000));
             } else {
                 console.error(`[XMailAI] Attempt ${attempt} failed (final): ${msg}`);
             }
