@@ -33,7 +33,9 @@ async function updateStatus(jobId, stage, message) {
 // - The handler runs asynchronously for up to 15 minutes
 // - Any return value is IGNORED (client already got 202)
 export default async (request, context) => {
-    console.log("[XMailAI] Background function invoked");
+    // Debug: log which API keys are available at runtime
+    const envKeys = Object.keys(process.env).filter(k => k.includes("API") || k.includes("NVIDIA") || k.includes("OPENROUTER") || k.includes("TAVILY") || k.includes("RESEND"));
+    console.log(`[XMailAI] Background function invoked. Available env keys: [${envKeys.join(", ")}]`);
 
     let body;
     try {
