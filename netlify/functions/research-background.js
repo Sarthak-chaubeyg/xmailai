@@ -305,8 +305,7 @@ async function generateWithNemotron(query, ragContext, mode, sourceCount) {
         ragContext,
         "",
         "INSTRUCTIONS:",
-        "Using EXCLUSIVELY the web research data above, produce your comprehensive research report.",
-        "Cite sources using [Source N] notation with the actual URL.",
+        "Cite sources using markdown links formatted exactly as [Source N](URL) (e.g., [Source 1](https://example.com/url)). Do not write out the URL in plain text next to the link.",
         isDeep
             ? "This is a DEEP RESEARCH request. Be extremely thorough and detailed."
             : "This is a SEARCH request. Be clear, concise, and actionable.",
@@ -420,7 +419,7 @@ KEY REQUIREMENTS:
 
 RULES:
 1. Base your report EXCLUSIVELY on the provided web research data.
-2. Cite every claim with [Source N] followed by the URL.
+2. Cite every claim with a markdown link to the source, formatted exactly as [Source N](URL) (e.g. [Source 1](https://example.com/url)). Do not output raw URLs or bracketed text without link formatting.
 3. If sources conflict, note the disagreement.
 4. Never fabricate information or URLs.
 
@@ -440,11 +439,69 @@ You have ${sourceCount} sources to work with.`;
 }
 
 // ================================================================
+// ================================================================
+// CITATION PARSING & CLEANUP
+// ================================================================
+function cleanAndFormatCitations(text, sources) {
+    if (!text) return "";
+
+    // 1. Convert 【N†URL】 to [Source N](URL)
+    // Matches: 【1†https://example.com】
+    text = text.replace(/【(\d+)†(https?:\/\/[^】\s]+)】/g, (match, num, url) => {
+        return `[Source ${num}](${url})`;
+    });
+
+    // 2. Convert 【N】 or 【N†】 where we look up the URL from sources array
+    text = text.replace(/【(\d+)(?:†)?】/g, (match, num) => {
+        const index = parseInt(num, 10) - 1;
+        const source = sources[index];
+        if (source && source.url) {
+            return `[Source ${num}](${source.url})`;
+        }
+        return `[Source ${num}]`;
+    });
+
+    // 3. Convert [Source N] followed by URL: [Source N] (https://...) or [Source N] https://...
+    text = text.replace(/\[Source\s+(\d+)\]\s*\(\s*(https?:\/\/[^\s)]+)\s*\)/gi, (match, num, url) => {
+        return `[Source ${num}](${url})`;
+    });
+
+    text = text.replace(/\[Source\s+(\d+)\][\s:]*(https?:\/\/[^\s\n,.<>【】()]+)/gi, (match, num, url) => {
+        return `[Source ${num}](${url})`;
+    });
+
+    // 4. Fallback: Convert [Source N] without parentheses to [Source N](URL) using lookup
+    text = text.replace(/\[Source\s+(\d+)\](?!\s*\()/gi, (match, num) => {
+        const index = parseInt(num, 10) - 1;
+        const source = sources[index];
+        if (source && source.url) {
+            return `[Source ${num}](${source.url})`;
+        }
+        return match;
+    });
+
+    // 5. Convert any bracketed numbers [N] to [Source N](URL) using lookup
+    text = text.replace(/\[(\d+)\](?!\s*\()/g, (match, num) => {
+        const index = parseInt(num, 10) - 1;
+        const source = sources[index];
+        if (source && source.url) {
+            return `[Source ${num}](${source.url})`;
+        }
+        return match;
+    });
+
+    return text;
+}
+
+// ================================================================
 // EMAIL TEMPLATE
 // ================================================================
 function buildEmailTemplate(query, markdownReport, sources) {
     marked.setOptions({ breaks: true, gfm: true });
-    let reportHtml = marked.parse(markdownReport);
+    
+    // Clean and format citations first
+    const cleanedMarkdown = cleanAndFormatCitations(markdownReport, sources);
+    let reportHtml = marked.parse(cleanedMarkdown);
     reportHtml = applyEmailInlineStyles(reportHtml);
 
     const sourcesHtml = sources
